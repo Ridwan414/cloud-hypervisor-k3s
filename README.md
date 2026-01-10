@@ -1,14 +1,14 @@
 # Cloud Hypervisor VM PoC
 
-A proof-of-concept for launching virtual machines using [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) - a lightweight, Rust-based VMM (Virtual Machine Monitor).
+A proof-of-concept for launching multiple virtual machines using [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) - a lightweight, Rust-based VMM (Virtual Machine Monitor).
 
 ## Overview
 
-This project provides scripts to:
+This project provides a Makefile-based interface to:
 - Download and set up Cloud Hypervisor
-- Create and configure Ubuntu VMs with cloud-init
-- Set up TAP networking for SSH access
-- Launch VMs with a single command
+- Create and manage multiple Ubuntu VMs with cloud-init
+- Set up bridge networking for VM communication
+- Launch, stop, and delete VMs with simple commands
 
 ## Prerequisites
 
@@ -28,56 +28,73 @@ sudo apt-get install qemu-utils cloud-image-utils
 ## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/cv-k3s-poc.git
-cd cv-k3s-poc
+# Initial setup (downloads ~700MB on first run)
+make setup
 
-# Run everything (downloads ~700MB on first run)
-./scripts/run-all.sh
+# Create and start a VM
+make vm-create ID=1
+make vm-start ID=1    # Runs in foreground, Ctrl+C to stop
 
-# SSH into the VM (from another terminal)
-ssh cloud@192.168.100.2
-# Password: cloud123
+# In another terminal, SSH into the VM
+make vm-ssh ID=1
+# Or: ssh cloud@192.168.100.2 (password: cloud123)
 ```
 
-## Scripts
+## Makefile Commands
 
-| Script | Purpose | Sudo |
-|--------|---------|------|
-| `01-setup.sh` | Download cloud-hypervisor, firmware, Ubuntu image | No |
-| `02-create-cloudinit.sh` | Generate cloud-init config (user, network) | No |
-| `03-setup-network.sh` | Create TAP device, enable NAT | Yes |
-| `04-launch-vm.sh` | Launch the VM | No |
-| `05-ssh-vm.sh` | SSH into running VM | No |
-| `run-all.sh` | Run all steps in sequence | Yes |
-| `cleanup.sh` | Remove TAP device and iptables rules | Yes |
+| Command | Description | Sudo |
+|---------|-------------|------|
+| `make setup` | Download cloud-hypervisor, firmware, Ubuntu image | No |
+| `make vm-create ID=N` | Create VM N (disk, cloud-init, networking) | Yes |
+| `make vm-start ID=N` | Start VM N (foreground) | No |
+| `make vm-stop ID=N` | Stop VM N | No |
+| `make vm-delete ID=N` | Delete VM N and cleanup resources | Yes |
+| `make vm-ssh ID=N` | SSH into VM N | No |
+| `make vm-list` | List all VMs and their status | No |
+| `make clean` | Stop all VMs, remove all resources | Yes |
+| `make help` | Show available commands | No |
 
-## Architecture
+## Multi-VM Example
 
+```bash
+# Setup (first time only)
+make setup
+
+# Create multiple VMs
+make vm-create ID=1    # IP: 192.168.100.2
+make vm-create ID=2    # IP: 192.168.100.3
+make vm-create ID=3    # IP: 192.168.100.4
+
+# Start VMs (each in a separate terminal, or background with &)
+make vm-start ID=1 &
+make vm-start ID=2 &
+make vm-start ID=3 &
+
+# Check status
+make vm-list
+
+# SSH into VMs
+make vm-ssh ID=1
+make vm-ssh ID=2
+
+# Stop and delete
+make vm-stop ID=1
+make vm-delete ID=1
+
+# Cleanup everything
+make clean
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      HOST SYSTEM                        │
-│                                                         │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │              Cloud Hypervisor (VMM)               │  │
-│  │                                                   │  │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────────────┐   │  │
-│  │  │ 2 vCPUs │  │ 2GB RAM │  │ virtio devices  │   │  │
-│  │  └─────────┘  └─────────┘  └─────────────────┘   │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                              │
-│                    ┌─────┴─────┐                        │
-│                    │  /dev/kvm │                        │
-│                    └───────────┘                        │
-│                                                         │
-│  ┌──────────────┐    ┌──────────────────────────────┐  │
-│  │ TAP (tap0)   │    │ Disk: Ubuntu 22.04 (raw)     │  │
-│  │192.168.100.1 │    │ Cloud-init: user + network   │  │
-│  └──────────────┘    └──────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
 
-Network: VM (192.168.100.2) ←→ TAP (192.168.100.1) ←→ NAT ←→ Internet
-```
+## VM Addressing
+
+Each VM gets unique resources based on its ID:
+
+| ID | IP Address | TAP Device | MAC Address |
+|----|------------|------------|-------------|
+| 1 | 192.168.100.2 | tap1 | 12:34:56:78:9a:01 |
+| 2 | 192.168.100.3 | tap2 | 12:34:56:78:9a:02 |
+| 3 | 192.168.100.4 | tap3 | 12:34:56:78:9a:03 |
+| N | 192.168.100.(N+1) | tapN | 12:34:56:78:9a:XX |
 
 ## VM Credentials
 
@@ -85,44 +102,56 @@ Network: VM (192.168.100.2) ←→ TAP (192.168.100.1) ←→ NAT ←→ Interne
 |-------|-------|
 | Username | `cloud` |
 | Password | `cloud123` |
-| IP Address | `192.168.100.2` |
-| SSH | `ssh cloud@192.168.100.2` |
+| SSH | `ssh cloud@192.168.100.<ID+1>` |
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         HOST SYSTEM                               │
+│                                                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐   │
+│  │ cloud-hypervisor│  │ cloud-hypervisor│  │ cloud-hypervisor│   │
+│  │     (VM 1)      │  │     (VM 2)      │  │     (VM 3)      │   │
+│  │  192.168.100.2  │  │  192.168.100.3  │  │  192.168.100.4  │   │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘   │
+│           │                    │                    │             │
+│       ┌───┴───┐            ┌───┴───┐            ┌───┴───┐        │
+│       │ tap1  │            │ tap2  │            │ tap3  │        │
+│       └───┬───┘            └───┬───┘            └───┬───┘        │
+│           │                    │                    │             │
+│           └────────────────────┼────────────────────┘             │
+│                                │                                  │
+│                    ┌───────────┴───────────┐                      │
+│                    │      vmbridge         │                      │
+│                    │    192.168.100.1      │                      │
+│                    └───────────┬───────────┘                      │
+│                                │                                  │
+│                          ┌─────┴─────┐                            │
+│                          │    NAT    │                            │
+│                          └─────┬─────┘                            │
+│                                │                                  │
+└────────────────────────────────┼──────────────────────────────────┘
+                                 │
+                            Internet
+```
 
 ## Configuration
 
-Environment variables can customize the VM:
+Environment variables can customize VMs:
 
 ```bash
-# Cloud-init config
-VM_IP=192.168.100.2        # VM IP address
-GATEWAY_IP=192.168.100.1   # Gateway (TAP IP)
-VM_USER=cloud              # Username
-VM_PASSWORD=cloud123       # Password
-
-# VM resources
-CPUS=2                     # Number of vCPUs
-MEMORY=2048M               # RAM size
-
-# Network
-TAP_DEV=tap0               # TAP device name
-MAC_ADDR=12:34:56:78:9a:bc # VM MAC address
+# VM resources (set before vm-start)
+CPUS=4 MEMORY=4096M make vm-start ID=1
 
 # Boot mode
-BOOT_MODE=firmware         # 'firmware' or 'kernel'
-```
-
-Example:
-```bash
-CPUS=4 MEMORY=4096M ./scripts/04-launch-vm.sh
+BOOT_MODE=firmware    # 'firmware' (default) or 'kernel'
 ```
 
 ## Documentation
 
-See [docs/cloud-hypervisor-guide.md](docs/cloud-hypervisor-guide.md) for:
-- Detailed explanation of each step
-- Boot sequence timeline
-- KVM and virtio internals
-- Troubleshooting guide
+- [Multi-VM Architecture](docs/multi-vm-architecture.md) - How the multi-VM system works
+- [Cloud Hypervisor Guide](docs/cloud-hypervisor-guide.md) - Detailed internals and troubleshooting
 
 ## Troubleshooting
 
@@ -134,51 +163,70 @@ sudo usermod -aG kvm $USER
 
 ### VM not reachable
 ```bash
-# Check TAP device
-ip addr show tap0
+# Check bridge and TAP devices
+ip addr show vmbridge
+bridge link show
 
 # Check IP forwarding
 cat /proc/sys/net/ipv4/ip_forward
 ```
 
-### Disk locked error
+### TAP device busy error
 ```bash
-pkill -9 cloud-hypervisor
-rm -f vm/*.raw
-./scripts/01-setup.sh  # Re-downloads and converts image
+# Stop all VMs and recreate
+make vm-stop ID=N
+make vm-delete ID=N
+make vm-create ID=N
 ```
 
 ### Full reset
 ```bash
-pkill -9 cloud-hypervisor
-sudo ./scripts/cleanup.sh
+make clean
 rm -rf vm/
-./scripts/run-all.sh
+make setup
 ```
 
 ## Project Structure
 
 ```
-cv-k3s-poc/
+cloud-hypervisor-k3s-poc/
+├── Makefile                     # Main interface
 ├── README.md
-├── .gitignore
-├── plan.md                      # Implementation plan
 ├── docs/
-│   └── cloud-hypervisor-guide.md
+│   ├── cloud-hypervisor-guide.md
+│   └── multi-vm-architecture.md
 ├── scripts/
-│   ├── 01-setup.sh
-│   ├── 02-create-cloudinit.sh
-│   ├── 03-setup-network.sh
-│   ├── 04-launch-vm.sh
-│   ├── 05-ssh-vm.sh
-│   ├── run-all.sh
-│   └── cleanup.sh
+│   ├── 01-setup.sh              # Download binaries and images
+│   ├── vm-create.sh             # Create VM (disk, cloud-init, TAP)
+│   ├── vm-start.sh              # Start a VM
+│   ├── vm-stop.sh               # Stop a VM
+│   ├── vm-delete.sh             # Delete a VM
+│   ├── vm-list.sh               # List all VMs
+│   ├── vm-ssh.sh                # SSH into a VM
+│   └── cleanup.sh               # Remove all VMs and networking
 └── vm/                          # Created by scripts (gitignored)
-    ├── cloud-hypervisor
-    ├── hypervisor-fw
-    ├── jammy-server-cloudimg-amd64.raw
-    └── cloudinit.img
+    ├── cloud-hypervisor         # VMM binary
+    ├── hypervisor-fw            # UEFI firmware
+    ├── jammy-server-cloudimg-amd64.raw  # Base image
+    ├── vm-1/                    # VM 1 directory
+    │   ├── disk.raw             # VM disk (copy of base)
+    │   ├── cloudinit.img        # Cloud-init ISO
+    │   └── vm.conf              # VM configuration
+    └── vm-2/                    # VM 2 directory
+        └── ...
 ```
+
+## Legacy Scripts
+
+The original single-VM scripts are still available:
+
+| Script | Purpose |
+|--------|---------|
+| `02-create-cloudinit.sh` | Generate single-VM cloud-init |
+| `03-setup-network.sh` | Create single TAP device |
+| `04-launch-vm.sh` | Launch single VM |
+| `05-ssh-vm.sh` | SSH into single VM |
+| `run-all.sh` | Run single-VM setup |
 
 ## References
 
@@ -190,4 +238,3 @@ cv-k3s-poc/
 ## License
 
 MIT
-# cloud-hypervisor-k3s-poc
