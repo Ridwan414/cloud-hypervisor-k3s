@@ -38,8 +38,11 @@ VM_HOSTNAME="vm-${VM_ID}"
 VM_USER="${VM_USER:-cloud}"
 VM_PASSWORD="${VM_PASSWORD:-cloud123}"
 
+DISK_SIZE="${DISK_SIZE:-10G}"
+
 echo "=== Creating VM ${VM_ID} ==="
 echo "Directory: ${VM_DIR}"
+echo "Disk size: ${DISK_SIZE}"
 echo "TAP device: ${TAP_DEV}"
 echo "Bridge: ${BRIDGE_DEV}"
 echo "IP address: ${VM_IP}"
@@ -78,6 +81,10 @@ mkdir -p "${VM_DIR}"
 # Copy base disk image
 echo "Copying base disk image (this may take a moment)..."
 cp --sparse=always "${BASE_IMAGE}" "${VM_DIR}/disk.raw"
+
+# Resize disk to specified size
+echo "Resizing disk to ${DISK_SIZE}..."
+qemu-img resize "${VM_DIR}/disk.raw" "${DISK_SIZE}"
 
 # Get SSH public key if available
 SSH_KEY=""
