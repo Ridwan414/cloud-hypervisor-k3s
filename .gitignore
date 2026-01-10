@@ -1,0 +1,27 @@
+# VM files (large binaries and images)
+vm/cloud-hypervisor
+vm/hypervisor-fw
+vm/*.img
+vm/*.raw
+vm/*.qcow2
+
+# Cloud-init generated files
+vm/meta-data
+vm/user-data
+vm/network-config
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
+*.bak
