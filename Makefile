@@ -1,4 +1,4 @@
-.PHONY: setup vm-create vm-start vm-stop vm-delete vm-ssh vm-list clean help
+.PHONY: setup vm-create vm-start vm-stop vm-delete vm-ssh vm-list vm-wg-status clean help
 
 help:
 	@echo "Cloud Hypervisor VM Management"
@@ -13,6 +13,7 @@ help:
 	@echo "  make vm-delete ID=N     Delete VM N and cleanup resources"
 	@echo "  make vm-ssh ID=N        SSH into VM N"
 	@echo "  make vm-list            List all VMs and their status"
+	@echo "  make vm-wg-status       Show WireGuard port forwarding status"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              Stop all VMs, remove all resources"
@@ -50,6 +51,9 @@ vm-ssh:
 
 vm-list:
 	@./scripts/vm-list.sh
+
+vm-wg-status:
+	@sudo ./scripts/vm-wg-status.sh
 
 clean:
 	sudo ./scripts/cleanup.sh

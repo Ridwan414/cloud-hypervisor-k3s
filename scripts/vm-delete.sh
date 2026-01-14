@@ -48,6 +48,32 @@ else
         kill -9 "${ORPHAN_PID}" 2>/dev/null || true
     fi
 
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # Clean up WireGuard Port Forwarding Rules
+    # ═══════════════════════════════════════════════════════════════════════════════
+    if [[ -f "${VM_DIR}/vm.conf" ]]; then
+        source "${VM_DIR}/vm.conf"
+
+        if [[ -n "${WG_PORT}" ]] && [[ -n "${VM_IP}" ]]; then
+            echo "Removing WireGuard port forwarding rules..."
+
+            # Get primary interface
+            PRIMARY_IF=$(ip route | grep default | awk '{print $5}' | head -1)
+
+            # Remove FORWARD rule
+            if iptables -C FORWARD -p udp -d "${VM_IP}" --dport "${WG_PORT}" -j ACCEPT 2>/dev/null; then
+                iptables -D FORWARD -p udp -d "${VM_IP}" --dport "${WG_PORT}" -j ACCEPT
+                echo "  Removed FORWARD rule for UDP ${WG_PORT}"
+            fi
+
+            # Remove DNAT rule
+            if iptables -t nat -C PREROUTING -i "${PRIMARY_IF}" -p udp --dport "${WG_PORT}" -j DNAT --to-destination "${VM_IP}:${WG_PORT}" 2>/dev/null; then
+                iptables -t nat -D PREROUTING -i "${PRIMARY_IF}" -p udp --dport "${WG_PORT}" -j DNAT --to-destination "${VM_IP}:${WG_PORT}"
+                echo "  Removed DNAT rule for UDP ${WG_PORT}"
+            fi
+        fi
+    fi
+
     # Remove VM directory
     echo "Removing VM directory..."
     rm -rf "${VM_DIR}"

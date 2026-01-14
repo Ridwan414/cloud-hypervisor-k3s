@@ -40,6 +40,10 @@ VM_PASSWORD="${VM_PASSWORD:-cloud123}"
 
 DISK_SIZE="${DISK_SIZE:-10G}"
 
+# WireGuard port allocation for mesh networking
+# Each VM gets a unique port: 51820 + VM_ID
+WG_PORT=$((51820 + VM_ID))
+
 echo "=== Creating VM ${VM_ID} ==="
 echo "Directory: ${VM_DIR}"
 echo "Disk size: ${DISK_SIZE}"
@@ -48,6 +52,7 @@ echo "Bridge: ${BRIDGE_DEV}"
 echo "IP address: ${VM_IP}"
 echo "MAC address: ${MAC_ADDR}"
 echo "Hostname: ${VM_HOSTNAME}"
+echo "WireGuard port: ${WG_PORT}"
 
 # Check if VM already exists
 if [[ -d "${VM_DIR}" ]]; then
@@ -125,11 +130,18 @@ cat >> "${VM_DIR}/user-data" <<EOF
 
 ssh_pwauth: true
 
-package_update: false
+package_update: true
+
+packages:
+  - wireguard-tools
 
 runcmd:
   - systemctl enable ssh
   - systemctl start ssh
+  - curl -sL 'https://apt.netmaker.org/gpg.key' | sudo tee /etc/apt/trusted.gpg.d/netclient.asc
+  - curl -sL 'https://apt.netmaker.org/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/netclient.list
+  - apt-get update
+  - apt-get install -y netclient
   - echo "VM ${VM_ID} is ready" > /var/log/vm-ready.log
 EOF
 
@@ -206,6 +218,26 @@ if ! iptables -C FORWARD -i "${BRIDGE_DEV}" -o "${PRIMARY_IF}" -j ACCEPT 2>/dev/
     iptables -A FORWARD -i "${PRIMARY_IF}" -o "${BRIDGE_DEV}" -m state --state RELATED,ESTABLISHED -j ACCEPT
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# WireGuard Port Forwarding for Mesh Networking
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "Setting up WireGuard port forwarding..."
+echo "  Allocated port: UDP ${WG_PORT}"
+echo "  Forwarding: ${PRIMARY_IF}:${WG_PORT} → ${VM_IP}:${WG_PORT}"
+
+# Allow forwarding UDP traffic to VM's WireGuard port
+if ! iptables -C FORWARD -p udp -d "${VM_IP}" --dport "${WG_PORT}" -j ACCEPT 2>/dev/null; then
+    iptables -I FORWARD -p udp -d "${VM_IP}" --dport "${WG_PORT}" -j ACCEPT
+    echo "  Added FORWARD rule for UDP ${WG_PORT}"
+fi
+
+# DNAT: Redirect incoming UDP on WG_PORT to VM
+if ! iptables -t nat -C PREROUTING -i "${PRIMARY_IF}" -p udp --dport "${WG_PORT}" -j DNAT --to-destination "${VM_IP}:${WG_PORT}" 2>/dev/null; then
+    iptables -t nat -A PREROUTING -i "${PRIMARY_IF}" -p udp --dport "${WG_PORT}" -j DNAT --to-destination "${VM_IP}:${WG_PORT}"
+    echo "  Added DNAT rule: ${PRIMARY_IF}:${WG_PORT} → ${VM_IP}:${WG_PORT}"
+fi
+
 # Save VM metadata
 cat > "${VM_DIR}/vm.conf" <<EOF
 VM_ID=${VM_ID}
@@ -214,6 +246,7 @@ TAP_DEV=${TAP_DEV}
 MAC_ADDR=${MAC_ADDR}
 VM_HOSTNAME=${VM_HOSTNAME}
 VM_USER=${VM_USER}
+WG_PORT=${WG_PORT}
 EOF
 
 # Change ownership of VM directory to the invoking user (so vm-start can write PID file)
@@ -223,6 +256,10 @@ fi
 
 echo ""
 echo "=== VM ${VM_ID} Created Successfully ==="
+echo ""
+echo "VM Details:"
+echo "  IP Address:     ${VM_IP}"
+echo "  WireGuard Port: ${WG_PORT} (UDP)"
 echo ""
 echo "To start the VM:  make vm-start ID=${VM_ID}"
 echo "To SSH into it:   make vm-ssh ID=${VM_ID}"
