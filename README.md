@@ -156,10 +156,20 @@ BOOT_MODE=firmware    # 'firmware' (default) or 'kernel'
 ## Troubleshooting
 
 ### Permission denied on /dev/kvm
+
+Error: `Failed to open hypervisor interface` / `Permission denied (os error 13)`
+
 ```bash
+# Add user to kvm group
 sudo usermod -aG kvm $USER
-# Log out and back in
+
+# IMPORTANT: Group changes require a new session. Choose one:
+newgrp kvm              # Apply immediately (current shell only)
+# OR
+# Log out and log back in (applies to all sessions)
 ```
+
+**Note:** Running `usermod` alone is not enough - the group membership only takes effect after starting a new session.
 
 ### VM not reachable
 ```bash
